@@ -1,9 +1,11 @@
 from dataclasses import dataclass, field
 
+
 @dataclass
 class Message:
     role: str
     content: str
+
 
 @dataclass
 class Conversation:

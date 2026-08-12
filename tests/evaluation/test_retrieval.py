@@ -53,9 +53,7 @@ def test_mrr_uses_first_relevant_rank():
     assert mrr(
         results,
         relevant,
-    ) == pytest.approx(
-        1.0 / 3.0
-    )
+    ) == pytest.approx(1.0 / 3.0)
 
 
 def test_evaluate_retrieval_returns_expected_structure():
@@ -83,17 +81,11 @@ def test_evaluate_retrieval_returns_expected_structure():
     assert "recall_at_5" in result
     assert "mrr" in result
 
-    assert result["recall_at_3"] == pytest.approx(
-        1.0
-    )
+    assert result["recall_at_3"] == pytest.approx(1.0)
 
-    assert result["recall_at_5"] == pytest.approx(
-        1.0
-    )
+    assert result["recall_at_5"] == pytest.approx(1.0)
 
     # Case 1: relevant document at rank 1 -> 1.0
     # Case 2: relevant document at rank 2 -> 0.5
     # Mean reciprocal rank = (1.0 + 0.5) / 2 = 0.75
-    assert result["mrr"] == pytest.approx(
-        0.75
-    )
+    assert result["mrr"] == pytest.approx(0.75)

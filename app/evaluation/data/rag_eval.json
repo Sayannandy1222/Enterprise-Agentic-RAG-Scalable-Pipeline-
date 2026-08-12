@@ -1,24 +1,183 @@
 {
   "cases": [
     {
-      "id": "dc-motor-001",
-      "query": "How does a DC motor work?",
+      "id": "attention_001",
+      "query": "What is the Transformer architecture?",
       "relevant_chunk_ids": [
-        "chunk-a"
+        "chunk_038",
+        "chunk_011",
+        "chunk_010"
       ]
     },
     {
-      "id": "dc-motor-002",
-      "query": "What affects DC motor speed?",
+      "id": "attention_002",
+      "query": "Why does the Transformer use attention instead of recurrence and convolution?",
       "relevant_chunk_ids": [
-        "chunk-b"
+        "chunk_002",
+        "chunk_021",
+        "chunk_006"
       ]
     },
     {
-      "id": "dc-motor-003",
-      "query": "What is back EMF in a DC motor?",
+      "id": "attention_003",
+      "query": "What is scaled dot-product attention?",
       "relevant_chunk_ids": [
-        "chunk-c"
+        "chunk_019",
+        "chunk_013",
+        "chunk_004"
+      ]
+    },
+    {
+      "id": "attention_004",
+      "query": "What is multi-head attention?",
+      "relevant_chunk_ids": [
+        "chunk_038",
+        "chunk_017",
+        "chunk_016"
+      ]
+    },
+    {
+      "id": "attention_005",
+      "query": "How does positional encoding work in the Transformer?",
+      "relevant_chunk_ids": [
+        "chunk_037",
+        "chunk_031",
+        "chunk_023"
+      ]
+    },
+    {
+      "id": "attention_006",
+      "query": "Why is positional encoding necessary in the Transformer?",
+      "relevant_chunk_ids": [
+        "chunk_037",
+        "chunk_031",
+        "chunk_023"
+      ]
+    },
+    {
+      "id": "attention_007",
+      "query": "What are the advantages of self-attention compared with recurrent layers?",
+      "relevant_chunk_ids": [
+        "chunk_038",
+        "chunk_027",
+        "chunk_026"
+      ]
+    },
+    {
+      "id": "attention_008",
+      "query": "What is the encoder-decoder architecture of the Transformer?",
+      "relevant_chunk_ids": [
+        "chunk_040",
+        "chunk_038",
+        "chunk_031"
+      ]
+    },
+    {
+      "id": "attention_009",
+      "query": "How does the Transformer encoder work?",
+      "relevant_chunk_ids": [
+        "chunk_031",
+        "chunk_022",
+        "chunk_012"
+      ]
+    },
+    {
+      "id": "attention_010",
+      "query": "How does the Transformer decoder work?",
+      "relevant_chunk_ids": [
+        "chunk_031",
+        "chunk_022",
+        "chunk_012"
+      ]
+    },
+    {
+      "id": "attention_011",
+      "query": "What is masked multi-head attention in the decoder?",
+      "relevant_chunk_ids": [
+        "chunk_038",
+        "chunk_017",
+        "chunk_016"
+      ]
+    },
+    {
+      "id": "attention_012",
+      "query": "What is the purpose of residual connections in the Transformer?",
+      "relevant_chunk_ids": [
+        "chunk_012",
+        "chunk_011",
+        "chunk_047"
+      ]
+    },
+    {
+      "id": "attention_013",
+      "query": "What is layer normalization used for in the Transformer?",
+      "relevant_chunk_ids": [
+        "chunk_039",
+        "chunk_012",
+        "chunk_011"
+      ]
+    },
+    {
+      "id": "attention_014",
+      "query": "How does the Transformer achieve parallelization during training?",
+      "relevant_chunk_ids": [
+        "chunk_024",
+        "chunk_005",
+        "chunk_002"
+      ]
+    },
+    {
+      "id": "attention_015",
+      "query": "What are the two attention functions described in the paper?",
+      "relevant_chunk_ids": [
+        "chunk_022",
+        "chunk_014",
+        "chunk_044"
+      ]
+    },
+    {
+      "id": "attention_016",
+      "query": "What is the difference between single-head and multi-head attention?",
+      "relevant_chunk_ids": [
+        "chunk_017",
+        "chunk_016",
+        "chunk_015"
+      ]
+    },
+    {
+      "id": "attention_017",
+      "query": "What are the three types of attention used in the Transformer?",
+      "relevant_chunk_ids": [
+        "chunk_024",
+        "chunk_018",
+        "chunk_017"
+      ]
+    },
+    {
+      "id": "attention_018",
+      "query": "What datasets were used to evaluate the Transformer?",
+      "relevant_chunk_ids": [
+        "chunk_038",
+        "chunk_033",
+        "chunk_032"
+      ]
+    },
+    {
+      "id": "attention_019",
+      "query": "How did the Transformer perform on the WMT 2014 English-to-German translation task?",
+      "relevant_chunk_ids": [
+        "chunk_032",
+        "chunk_036",
+        "chunk_035"
+      ]
+    },
+    {
+      "id": "attention_020",
+      "query": "How did the Transformer perform on the WMT 2014 English-to-French translation task?",
+      "relevant_chunk_ids": [
+        "chunk_033",
+        "chunk_002",
+        "chunk_032"
       ]
     }
   ]

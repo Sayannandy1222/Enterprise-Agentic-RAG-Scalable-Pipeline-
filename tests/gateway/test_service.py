@@ -65,9 +65,7 @@ class HTTPError(Exception):
         self,
         status_code: int,
     ):
-        super().__init__(
-            f"HTTP {status_code}"
-        )
+        super().__init__(f"HTTP {status_code}")
         self.status_code = status_code
 
 
@@ -98,9 +96,7 @@ def test_success_without_retry():
     response = gateway(
         provider,
         max_retries=2,
-    ).generate(
-        LLMRequest(prompt="hello")
-    )
+    ).generate(LLMRequest(prompt="hello"))
 
     assert response.text == "hello"
     assert response.provider == "primary"
@@ -144,10 +140,7 @@ def test_gateway_snapshot_contains_gateway_and_circuit_data():
 
     assert "gateway" in snapshot
     assert "circuit_breakers" in snapshot
-    assert (
-        "primary"
-        in snapshot["circuit_breakers"]
-    )
+    assert "primary" in snapshot["circuit_breakers"]
 
 
 def test_retries_transient_error_and_succeeds():
@@ -164,15 +157,11 @@ def test_retries_transient_error_and_succeeds():
         max_retries=2,
     )
 
-    response = gw.generate(
-        LLMRequest(prompt="hello")
-    )
+    response = gw.generate(LLMRequest(prompt="hello"))
 
     assert response.text == "recovered"
     assert provider.calls == 2
-    assert (
-        gw.metrics_snapshot().retries == 1
-    )
+    assert gw.metrics_snapshot().retries == 1
 
 
 @pytest.mark.parametrize(
@@ -207,9 +196,7 @@ def test_transient_status_codes_are_retryable(
 
     assert response.text == "success"
     assert provider.calls == 2
-    assert (
-        gw.metrics_snapshot().retries == 1
-    )
+    assert gw.metrics_snapshot().retries == 1
 
 
 def test_non_transient_error_is_not_retried():
@@ -229,9 +216,7 @@ def test_non_transient_error_is_not_retried():
 
     assert response.metadata["failed"] is True
     assert provider.calls == 1
-    assert (
-        gw.metrics_snapshot().retries == 0
-    )
+    assert gw.metrics_snapshot().retries == 0
 
 
 def test_retry_history_is_recorded():
@@ -251,13 +236,8 @@ def test_retry_history_is_recorded():
     attempts = response.metadata["attempts"]
 
     assert len(attempts) == 1
-    assert (
-        attempts[0]["provider"]
-        == "primary"
-    )
-    assert (
-        attempts[0]["retry_index"] == 0
-    )
+    assert attempts[0]["provider"] == "primary"
+    assert attempts[0]["retry_index"] == 0
     assert attempts[0]["retry"] is True
 
 
@@ -359,10 +339,7 @@ def test_fallback_provider_can_retry_transient_failure():
 
     response = gw.generate("hello")
 
-    assert (
-        response.text
-        == "fallback-recovered"
-    )
+    assert response.text == "fallback-recovered"
     assert primary.calls == 2
     assert fallback.calls == 2
 
@@ -394,14 +371,9 @@ def test_retry_history_contains_primary_and_fallback_attempts():
     history = response.metadata["attempts"]
 
     assert len(history) == 1
-    assert (
-        history[0]["provider"]
-        == "primary"
-    )
+    assert history[0]["provider"] == "primary"
 
-    assert response.metadata[
-        "fallback"
-    ] is True
+    assert response.metadata["fallback"] is True
 
 
 def test_circuit_breaker_opens_after_threshold():
@@ -465,9 +437,7 @@ def test_string_request_is_supported():
         responses=["hello"],
     )
 
-    response = gateway(
-        provider
-    ).generate("hello")
+    response = gateway(provider).generate("hello")
 
     assert response.text == "hello"
     assert provider.calls == 1

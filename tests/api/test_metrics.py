@@ -36,9 +36,7 @@ def build_app(retrieval=None):
 
 
 def test_metrics_endpoint_exists():
-    client = TestClient(
-        build_app(FakeRetrieval())
-    )
+    client = TestClient(build_app(FakeRetrieval()))
 
     response = client.get("/metrics")
 
@@ -46,9 +44,7 @@ def test_metrics_endpoint_exists():
 
 
 def test_metrics_endpoint_returns_retrieval_key():
-    client = TestClient(
-        build_app(FakeRetrieval())
-    )
+    client = TestClient(build_app(FakeRetrieval()))
 
     response = client.get("/metrics")
 
@@ -66,9 +62,7 @@ def test_metrics_endpoint_returns_retrieval_metrics():
         }
     )
 
-    client = TestClient(
-        build_app(retrieval)
-    )
+    client = TestClient(build_app(retrieval))
 
     response = client.get("/metrics")
 
@@ -82,9 +76,7 @@ def test_metrics_endpoint_returns_retrieval_metrics():
 def test_metrics_calls_retrieval_metrics_once():
     retrieval = FakeRetrieval()
 
-    client = TestClient(
-        build_app(retrieval)
-    )
+    client = TestClient(build_app(retrieval))
 
     response = client.get("/metrics")
 
@@ -93,16 +85,12 @@ def test_metrics_calls_retrieval_metrics_once():
 
 
 def test_metrics_without_retrieval_returns_empty_metrics():
-    client = TestClient(
-        build_app()
-    )
+    client = TestClient(build_app())
 
     response = client.get("/metrics")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "retrieval": {}
-    }
+    assert response.json() == {"retrieval": {}}
 
 
 def test_metrics_preserves_numeric_values():
@@ -115,18 +103,14 @@ def test_metrics_preserves_numeric_values():
         }
     )
 
-    client = TestClient(
-        build_app(retrieval)
-    )
+    client = TestClient(build_app(retrieval))
 
     body = client.get("/metrics").json()
 
     assert body["retrieval"]["requests"] == 100
     assert body["retrieval"]["cache_hits"] == 55
     assert body["retrieval"]["cache_misses"] == 45
-    assert body["retrieval"]["p95_latency_ms"] == pytest.approx(
-        12.75
-    )
+    assert body["retrieval"]["p95_latency_ms"] == pytest.approx(12.75)
 
 
 def test_metrics_preserves_nested_metrics():
@@ -143,18 +127,12 @@ def test_metrics_preserves_nested_metrics():
         }
     )
 
-    client = TestClient(
-        build_app(retrieval)
-    )
+    client = TestClient(build_app(retrieval))
 
     body = client.get("/metrics").json()
 
-    assert body["retrieval"]["latency"]["p50_ms"] == pytest.approx(
-        5.2
-    )
-    assert body["retrieval"]["latency"]["p95_ms"] == pytest.approx(
-        11.8
-    )
+    assert body["retrieval"]["latency"]["p50_ms"] == pytest.approx(5.2)
+    assert body["retrieval"]["latency"]["p95_ms"] == pytest.approx(11.8)
     assert body["retrieval"]["cache"]["hits"] == 20
     assert body["retrieval"]["cache"]["misses"] == 5
 
@@ -162,16 +140,12 @@ def test_metrics_preserves_nested_metrics():
 def test_metrics_supports_empty_retrieval_metrics():
     retrieval = FakeRetrieval({})
 
-    client = TestClient(
-        build_app(retrieval)
-    )
+    client = TestClient(build_app(retrieval))
 
     response = client.get("/metrics")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "retrieval": {}
-    }
+    assert response.json() == {"retrieval": {}}
     assert retrieval.calls == 1
 
 
@@ -184,9 +158,7 @@ def test_metrics_is_read_only():
 
     retrieval = FakeRetrieval(payload)
 
-    client = TestClient(
-        build_app(retrieval)
-    )
+    client = TestClient(build_app(retrieval))
 
     first = client.get("/metrics").json()
     second = client.get("/metrics").json()

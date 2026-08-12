@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from typing import Iterable, Sequence
 
 from app.ingestion.models import Document
@@ -30,13 +31,21 @@ class InMemoryVectorStore:
             if self.embedder is None:
                 raise ValueError("embedder is required")
 
-            self._vectors[id(document)] = self.embedder.embed(
-                document.text
-            )
+            self._vectors[id(document)] = self.embedder.embed(document.text)
 
     add = upsert
 
     def count(self) -> int:
+        if self.client is not None:
+            try:
+                result = self.client.count(
+                    collection_name=self.collection,
+                    exact=True,
+                )
+                return int(result.count)
+            except Exception:
+                pass
+
         return len(self.items)
 
     @staticmethod
@@ -45,6 +54,48 @@ class InMemoryVectorStore:
         right: Sequence[float],
     ) -> float:
         return sum(a * b for a, b in zip(left, right))
+
+    def load_documents(self, batch_size: int = 256) -> list[Document]:
+        """
+        Load persisted documents from Qdrant Cloud.
+
+        Qdrant is the persistent source of truth. This method hydrates
+        application-level document state so components such as BM25 can
+        be reconstructed after process restart.
+        """
+        if batch_size <= 0:
+            raise ValueError("batch_size must be greater than zero")
+
+        if self.client is None:
+            return []
+
+        documents: list[Document] = []
+        offset = None
+
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=self.collection,
+                limit=batch_size,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+
+            for point in points:
+                payload = point.payload or {}
+
+                documents.append(
+                    Document(
+                        text=str(payload.get("text", "")),
+                        source=str(payload.get("source", "")),
+                        metadata=payload.get("metadata", {}) or {},
+                    )
+                )
+
+            if offset is None:
+                break
+
+        return documents
 
     def search(
         self,
@@ -57,9 +108,7 @@ class InMemoryVectorStore:
                 raise ValueError("embedder is required")
 
             if query is None:
-                raise ValueError(
-                    "query or query_vector is required"
-                )
+                raise ValueError("query or query_vector is required")
 
             query_vector = self.embedder.embed(query)
 
@@ -99,11 +148,13 @@ class QdrantVectorStore(InMemoryVectorStore):
         embedder,
         url: str = "",
         collection: str = "documents",
+        api_key: str = "",
     ) -> None:
         super().__init__(embedder)
 
         self.url = url
         self.collection = collection
+        self.api_key = api_key
         self.client = None
 
         try:
@@ -112,6 +163,7 @@ class QdrantVectorStore(InMemoryVectorStore):
             if url:
                 self.client = QdrantClient(
                     url=url,
+                    api_key=api_key or None,
                     timeout=5,
                 )
         except Exception:
@@ -138,13 +190,9 @@ class QdrantVectorStore(InMemoryVectorStore):
                 VectorParams,
             )
 
-            first_vector = self._vectors[
-                id(documents[0])
-            ]
+            first_vector = self._vectors[id(documents[0])]
 
-            if not self.client.collection_exists(
-                self.collection
-            ):
+            if not self.client.collection_exists(self.collection):
                 self.client.create_collection(
                     collection_name=self.collection,
                     vectors_config=VectorParams(
@@ -158,12 +206,12 @@ class QdrantVectorStore(InMemoryVectorStore):
             for document in documents:
                 vector = self._vectors[id(document)]
 
-                point_id = hashlib.sha1(
-                    (
-                        f"{document.source}:"
-                        f"{document.text}"
-                    ).encode("utf-8")
-                ).hexdigest()[:16]
+                point_id = str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"{document.source}:{document.text}",
+                    )
+                )
 
                 points.append(
                     PointStruct(
@@ -185,6 +233,48 @@ class QdrantVectorStore(InMemoryVectorStore):
         except Exception:
             self.client = None
 
+    def load_documents(self, batch_size: int = 256) -> list[Document]:
+        """
+        Load persisted documents from Qdrant Cloud.
+
+        Qdrant is the persistent source of truth. This method hydrates
+        application-level document state so components such as BM25 can
+        be reconstructed after process restart.
+        """
+        if batch_size <= 0:
+            raise ValueError("batch_size must be greater than zero")
+
+        if self.client is None:
+            return []
+
+        documents: list[Document] = []
+        offset = None
+
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=self.collection,
+                limit=batch_size,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+
+            for point in points:
+                payload = point.payload or {}
+
+                documents.append(
+                    Document(
+                        text=str(payload.get("text", "")),
+                        source=str(payload.get("source", "")),
+                        metadata=payload.get("metadata", {}) or {},
+                    )
+                )
+
+            if offset is None:
+                break
+
+        return documents
+
     def search(
         self,
         query: str | None = None,
@@ -195,44 +285,39 @@ class QdrantVectorStore(InMemoryVectorStore):
             try:
                 if query_vector is None:
                     if self.embedder is None:
-                        raise ValueError(
-                            "embedder is required"
-                        )
+                        raise ValueError("embedder is required")
 
                     if query is None:
-                        raise ValueError(
-                            "query or query_vector is required"
-                        )
+                        raise ValueError("query or query_vector is required")
 
-                    query_vector = self.embedder.embed(
-                        query
-                    )
+                    query_vector = self.embedder.embed(query)
 
-                hits = self.client.search(
+                response = self.client.query_points(
                     collection_name=self.collection,
-                    query_vector=list(query_vector),
+                    query=list(query_vector),
                     limit=limit,
+                    with_payload=True,
                 )
 
                 return [
                     (
-                        float(hit.score),
+                        float(point.score),
                         Document(
-                            text=hit.payload.get(
+                            text=(point.payload or {}).get(
                                 "text",
                                 "",
                             ),
-                            source=hit.payload.get(
+                            source=(point.payload or {}).get(
                                 "source",
                                 "",
                             ),
-                            metadata=hit.payload.get(
+                            metadata=(point.payload or {}).get(
                                 "metadata",
                                 {},
                             ),
                         ),
                     )
-                    for hit in hits
+                    for point in response.points
                 ]
 
             except Exception:

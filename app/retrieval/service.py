@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+
 from collections import deque
 from statistics import median
 from time import perf_counter
 from typing import Any, Sequence
 
 from app.reranking.flashrank import FlashRankReranker
+from app.retrieval.cache import BoundedLRUCache
 from app.retrieval.fusion import reciprocal_rank_fusion
 
 
@@ -52,45 +55,51 @@ class RetrievalService:
         rerank_limit: int = 8,
         top_k: int = 5,
         embedding_cache_size: int = 256,
+        rerank_cache_size: int = 256,
     ) -> None:
         if dense_limit <= 0:
-            raise ValueError(
-                "dense_limit must be greater than zero"
-            )
+            raise ValueError("dense_limit must be greater than zero")
 
         if bm25_limit <= 0:
-            raise ValueError(
-                "bm25_limit must be greater than zero"
-            )
+            raise ValueError("bm25_limit must be greater than zero")
 
         if rrf_limit <= 0:
-            raise ValueError(
-                "rrf_limit must be greater than zero"
-            )
+            raise ValueError("rrf_limit must be greater than zero")
 
         if rerank_limit <= 0:
-            raise ValueError(
-                "rerank_limit must be greater than zero"
-            )
+            raise ValueError("rerank_limit must be greater than zero")
 
         if top_k <= 0:
-            raise ValueError(
-                "top_k must be greater than zero"
-            )
+            raise ValueError("top_k must be greater than zero")
+
+        if dense_limit < top_k:
+            raise ValueError("dense_limit must be >= top_k")
+
+        if bm25_limit < top_k:
+            raise ValueError("bm25_limit must be >= top_k")
+
+        if rrf_limit < top_k:
+            raise ValueError("rrf_limit must be >= top_k")
+
+        if rerank_limit < top_k:
+            raise ValueError("rerank_limit must be >= top_k")
+
+        if rerank_limit > rrf_limit:
+            raise ValueError("rerank_limit cannot exceed rrf_limit")
+
+        if rrf_limit > dense_limit + bm25_limit:
+            raise ValueError("rrf_limit cannot exceed dense_limit + bm25_limit")
 
         if embedding_cache_size <= 0:
-            raise ValueError(
-                "embedding_cache_size must be greater than zero"
-            )
+            raise ValueError("embedding_cache_size must be greater than zero")
+
+        if rerank_cache_size <= 0:
+            raise ValueError("rerank_cache_size must be greater than zero")
 
         self.vector_store = vector_store
         self.bm25 = bm25
 
-        self.reranker = (
-            reranker
-            if reranker is not None
-            else FlashRankReranker()
-        )
+        self.reranker = reranker if reranker is not None else FlashRankReranker()
 
         self.dense_limit = dense_limit
         self.bm25_limit = bm25_limit
@@ -98,9 +107,7 @@ class RetrievalService:
         self.rerank_limit = rerank_limit
         self.top_k = top_k
 
-        self.embedding_cache_size = (
-            embedding_cache_size
-        )
+        self.embedding_cache_size = embedding_cache_size
 
         self._embedding_cache: dict[
             str,
@@ -110,11 +117,9 @@ class RetrievalService:
         self.embedding_cache_hits = 0
         self.embedding_cache_misses = 0
 
-        self.latencies: deque[
-            tuple[str, float]
-        ] = deque(
-            maxlen=10_000
-        )
+        self.rerank_cache = BoundedLRUCache[list[Any]](rerank_cache_size)
+
+        self.latencies: deque[tuple[str, float]] = deque(maxlen=10_000)
 
     # ------------------------------------------------------------------
     # EMBEDDING CACHE
@@ -149,27 +154,17 @@ class RetrievalService:
         )
 
         if embedder is None:
-            raise RuntimeError(
-                "vector_store must expose an embedder"
-            )
+            raise RuntimeError("vector_store must expose an embedder")
 
         embedding = embedder.embed(key)
 
         # Simple bounded FIFO eviction.
-        if len(self._embedding_cache) >= (
-            self.embedding_cache_size
-        ):
-            oldest_key = next(
-                iter(self._embedding_cache)
-            )
+        if len(self._embedding_cache) >= (self.embedding_cache_size):
+            oldest_key = next(iter(self._embedding_cache))
 
-            del self._embedding_cache[
-                oldest_key
-            ]
+            del self._embedding_cache[oldest_key]
 
-        self._embedding_cache[key] = list(
-            embedding
-        )
+        self._embedding_cache[key] = list(embedding)
 
         return list(embedding), False
 
@@ -194,21 +189,73 @@ class RetrievalService:
         misses = self.embedding_cache_misses
         total = hits + misses
 
-        hit_rate = (
-            hits / total
-            if total > 0
-            else 0.0
-        )
+        hit_rate = hits / total if total > 0 else 0.0
 
         return {
-            "size": len(
-                self._embedding_cache
-            ),
+            "size": len(self._embedding_cache),
             "capacity": self.embedding_cache_size,
             "hits": hits,
             "misses": misses,
             "hit_rate": hit_rate,
         }
+
+    # ------------------------------------------------------------------
+    # RERANK CACHE
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _document_identity(document: Any) -> str:
+        """Return a stable identity for a retrieval candidate."""
+
+        if hasattr(document, "metadata"):
+            metadata = getattr(document, "metadata", {}) or {}
+
+            for key in (
+                "chunk_id",
+                "id",
+                "document_id",
+                "source",
+            ):
+                value = metadata.get(key)
+                if value is not None:
+                    return str(value)
+
+        if hasattr(document, "text"):
+            text = str(document.text)
+        else:
+            text = str(document)
+
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _rerank_cache_key(
+        self,
+        query: str,
+        documents: Sequence[Any],
+        limit: int,
+    ) -> str:
+        candidate_ids = "|".join(
+            self._document_identity(document) for document in documents
+        )
+
+        raw = f"{query.strip()}::{limit}::{candidate_ids}"
+
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def clear_rerank_cache(self) -> None:
+        """Clear the reranking cache."""
+
+        self.rerank_cache.clear()
+
+    def rerank_cache_stats(self) -> dict[str, int | float]:
+        """Return reranking-cache statistics."""
+
+        return self.rerank_cache.stats()
+
+    def clear_caches(self) -> None:
+        """Clear retrieval embedding and reranking caches."""
+
+        self.clear_embedding_cache()
+        self.clear_rerank_cache()
 
     # ------------------------------------------------------------------
     # LATENCY
@@ -224,10 +271,7 @@ class RetrievalService:
 
         ordered = sorted(values)
 
-        index = int(
-            (len(ordered) - 1)
-            * percentile
-        )
+        index = int((len(ordered) - 1) * percentile)
 
         return ordered[index]
 
@@ -236,10 +280,7 @@ class RetrievalService:
         stage: str,
         started: float,
     ) -> float:
-        latency_ms = (
-            perf_counter()
-            - started
-        ) * 1000
+        latency_ms = (perf_counter() - started) * 1000
 
         self.latencies.append(
             (
@@ -296,17 +337,14 @@ class RetrievalService:
                     3,
                 ),
                 "mean": round(
-                    sum(values)
-                    / len(values),
+                    sum(values) / len(values),
                     3,
                 ),
             }
 
         # Preserve the original API/test contract.
         if "flashrank" in output:
-            output["rerank"] = output[
-                "flashrank"
-            ]
+            output["rerank"] = output["flashrank"]
 
         return output
 
@@ -342,20 +380,12 @@ class RetrievalService:
         """
 
         if not query or not query.strip():
-            raise ValueError(
-                "query must not be empty"
-            )
+            raise ValueError("query must not be empty")
 
-        requested_top_k = (
-            top_k
-            if top_k is not None
-            else self.top_k
-        )
+        requested_top_k = top_k if top_k is not None else self.top_k
 
         if requested_top_k <= 0:
-            raise ValueError(
-                "top_k must be greater than zero"
-            )
+            raise ValueError("top_k must be greater than zero")
 
         # ==============================================================
         # 1. EMBEDDING
@@ -366,15 +396,11 @@ class RetrievalService:
         (
             query_vector,
             embedding_cache_hit,
-        ) = self._get_query_embedding(
-            query
-        )
+        ) = self._get_query_embedding(query)
 
-        embedding_latency_ms = (
-            self._record_latency(
-                "embedding",
-                embedding_started,
-            )
+        embedding_latency_ms = self._record_latency(
+            "embedding",
+            embedding_started,
         )
 
         # ==============================================================
@@ -383,18 +409,14 @@ class RetrievalService:
 
         dense_started = perf_counter()
 
-        dense_results = (
-            self.vector_store.search(
-                query_vector=query_vector,
-                limit=self.dense_limit,
-            )
+        dense_results = self.vector_store.search(
+            query_vector=query_vector,
+            limit=self.dense_limit,
         )
 
-        dense_latency_ms = (
-            self._record_latency(
-                "dense",
-                dense_started,
-            )
+        dense_latency_ms = self._record_latency(
+            "dense",
+            dense_started,
         )
 
         # ==============================================================
@@ -403,19 +425,22 @@ class RetrievalService:
 
         bm25_started = perf_counter()
 
-        lexical_results = (
-            self.bm25.search(
-                query,
-                limit=self.bm25_limit,
-            )
+        lexical_results = self.bm25.search(
+            query,
+            limit=self.bm25_limit,
         )
 
-        bm25_latency_ms = (
-            self._record_latency(
-                "bm25",
-                bm25_started,
-            )
+        bm25_latency_ms = self._record_latency(
+            "bm25",
+            bm25_started,
         )
+
+        # ==============================================================
+        # RETRIEVAL HEALTH GUARDRAIL
+        # ==============================================================
+
+        if not dense_results and not lexical_results:
+            raise RuntimeError("retrieval indexes returned zero candidates")
 
         # ==============================================================
         # 4. RRF
@@ -423,20 +448,27 @@ class RetrievalService:
 
         rrf_started = perf_counter()
 
-        hybrid_candidates = (
-            reciprocal_rank_fusion(
-                dense_results,
-                lexical_results,
-                limit=self.rrf_limit,
-            )
+        hybrid_candidates = reciprocal_rank_fusion(
+            dense_results,
+            lexical_results,
+            limit=self.rrf_limit,
         )
 
-        rrf_latency_ms = (
-            self._record_latency(
-                "rrf",
-                rrf_started,
-            )
+        rrf_latency_ms = self._record_latency(
+            "rrf",
+            rrf_started,
         )
+
+        # ==============================================================
+        # RRF HEALTH GUARDRAIL
+        # ==============================================================
+
+        if not hybrid_candidates:
+            raise RuntimeError("RRF produced zero candidates")
+
+        # RRF must never exceed its configured capacity.
+        if len(hybrid_candidates) > self.rrf_limit:
+            raise RuntimeError("RRF returned more candidates than configured")
 
         # ==============================================================
         # 5. CANDIDATE PRUNING
@@ -447,34 +479,66 @@ class RetrievalService:
             self.rerank_limit,
         )
 
-        pruned_candidates = (
-            hybrid_candidates[
-                :candidate_limit
-            ]
-        )
+        pruned_candidates = hybrid_candidates[:candidate_limit]
 
         # ==============================================================
-        # 6. FLASHRANK
+        # 6. RERANK CACHE + FLASHRANK
         # ==============================================================
 
-        rerank_started = perf_counter()
+        rerank_stage_started = perf_counter()
 
-        reranked = self.reranker.rerank(
+        rerank_cache_key = self._rerank_cache_key(
             query,
             pruned_candidates,
-            limit=requested_top_k,
+            requested_top_k,
         )
 
-        rerank_latency_ms = (
-            self._record_latency(
-                "flashrank",
-                rerank_started,
+        rerank_cache_started = perf_counter()
+
+        cached_reranked, rerank_cache_hit = self.rerank_cache.get(rerank_cache_key)
+
+        rerank_cache_lookup_latency_ms = self._record_latency(
+            "rerank_cache",
+            rerank_cache_started,
+        )
+
+        flashrank_execution_latency_ms = 0.0
+
+        if rerank_cache_hit and cached_reranked is not None:
+            reranked = list(cached_reranked)
+
+        else:
+            flashrank_started = perf_counter()
+
+            reranked = self.reranker.rerank(
+                query,
+                pruned_candidates,
+                limit=requested_top_k,
             )
-        )
 
-        results = reranked[
-            :requested_top_k
-        ]
+            flashrank_execution_latency_ms = self._record_latency(
+                "flashrank",
+                flashrank_started,
+            )
+
+            self.rerank_cache.set(
+                rerank_cache_key,
+                list(reranked),
+            )
+
+        rerank_latency_ms = (perf_counter() - rerank_stage_started) * 1000
+
+        results = reranked[:requested_top_k]
+
+        # ==============================================================
+        # FINAL RESULT GUARDRAILS
+        # ==============================================================
+
+        if not results:
+            raise RuntimeError("reranking produced zero final results")
+
+        if len(results) > requested_top_k:
+            raise RuntimeError("retrieval returned more results than requested top_k")
 
         # ==============================================================
         # 7. TOTAL
@@ -517,26 +581,23 @@ class RetrievalService:
                 rerank_latency_ms,
                 3,
             ),
+            "rerank_cache_lookup_latency_ms": round(
+                rerank_cache_lookup_latency_ms,
+                3,
+            ),
+            "flashrank_execution_latency_ms": round(
+                flashrank_execution_latency_ms,
+                3,
+            ),
             "total_latency_ms": round(
                 total_latency_ms,
                 3,
             ),
-            "embedding_cache_hit": (
-                embedding_cache_hit
-            ),
-            "dense_candidate_count": len(
-                dense_results
-            ),
-            "bm25_candidate_count": len(
-                lexical_results
-            ),
-            "hybrid_candidate_count": len(
-                hybrid_candidates
-            ),
-            "rerank_candidate_count": len(
-                pruned_candidates
-            ),
-            "result_count": len(
-                results
-            ),
+            "embedding_cache_hit": (embedding_cache_hit),
+            "rerank_cache_hit": (rerank_cache_hit),
+            "dense_candidate_count": len(dense_results),
+            "bm25_candidate_count": len(lexical_results),
+            "hybrid_candidate_count": len(hybrid_candidates),
+            "rerank_candidate_count": len(pruned_candidates),
+            "result_count": len(results),
         }

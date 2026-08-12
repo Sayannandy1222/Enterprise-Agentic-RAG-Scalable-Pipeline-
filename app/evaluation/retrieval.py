@@ -16,17 +16,13 @@ def recall_at_k(
     """
 
     if k <= 0:
-        raise ValueError(
-            "k must be greater than zero"
-        )
+        raise ValueError("k must be greater than zero")
 
     if not results:
         return 0.0
 
     if len(results) != len(relevant):
-        raise ValueError(
-            "results and relevant must have the same length"
-        )
+        raise ValueError("results and relevant must have the same length")
 
     hits = 0
 
@@ -34,13 +30,9 @@ def recall_at_k(
         results,
         relevant,
     ):
-        relevant_set = set(
-            relevant_ids
-        )
+        relevant_set = set(relevant_ids)
 
-        retrieved_top_k = set(
-            retrieved[:k]
-        )
+        retrieved_top_k = set(retrieved[:k])
 
         if retrieved_top_k & relevant_set:
             hits += 1
@@ -84,9 +76,7 @@ def mean_reciprocal_rank(
         return 0.0
 
     if len(results) != len(relevant):
-        raise ValueError(
-            "results and relevant must have the same length"
-        )
+        raise ValueError("results and relevant must have the same length")
 
     scores = [
         reciprocal_rank(
@@ -128,19 +118,15 @@ def evaluate_retrieval(
     metrics: dict[str, float] = {}
 
     for k in ks:
-        metrics[
-            f"recall_at_{k}"
-        ] = recall_at_k(
+        metrics[f"recall_at_{k}"] = recall_at_k(
             results,
             relevant,
             k,
         )
 
-    metrics["mrr"] = (
-        mean_reciprocal_rank(
-            results,
-            relevant,
-        )
+    metrics["mrr"] = mean_reciprocal_rank(
+        results,
+        relevant,
     )
 
     return metrics

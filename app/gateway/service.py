@@ -83,8 +83,7 @@ class LLMProvider(Protocol):
     name: str
     model: str
 
-    def generate(self, request: LLMRequest) -> LLMResponse:
-        ...
+    def generate(self, request: LLMRequest) -> LLMResponse: ...
 
 
 # ============================================================================
@@ -112,14 +111,9 @@ class LocalProvider:
         context = context.replace("Context:", "").strip()
 
         if context:
-            answer = (
-                "Based on the retrieved context: "
-                f"{context[:600]}"
-            )
+            answer = f"Based on the retrieved context: {context[:600]}"
         else:
-            answer = (
-                "No relevant context was retrieved."
-            )
+            answer = "No relevant context was retrieved."
 
         input_tokens = _estimate_tokens(request.prompt)
         output_tokens = _estimate_tokens(answer)
@@ -166,9 +160,7 @@ class GatewayMetricsSnapshot:
         if self.successes + self.failures == 0:
             return 0.0
 
-        return self.total_latency_ms / (
-            self.successes + self.failures
-        )
+        return self.total_latency_ms / (self.successes + self.failures)
 
 
 class GatewayMetrics:
@@ -190,9 +182,7 @@ class GatewayMetrics:
         self._snapshot.total_latency_ms += latency_ms
         self._snapshot.input_tokens += input_tokens
         self._snapshot.output_tokens += output_tokens
-        self._snapshot.total_tokens += (
-            input_tokens + output_tokens
-        )
+        self._snapshot.total_tokens += input_tokens + output_tokens
 
     def record_failure(
         self,
@@ -214,9 +204,7 @@ class GatewayMetrics:
         self._snapshot.circuit_open_events += 1
 
     def snapshot(self) -> GatewayMetricsSnapshot:
-        return GatewayMetricsSnapshot(
-            **self._snapshot.to_dict()
-        )
+        return GatewayMetricsSnapshot(**self._snapshot.to_dict())
 
     def to_dict(self) -> dict[str, Any]:
         return self.snapshot().to_dict()
@@ -251,14 +239,10 @@ class CircuitBreaker:
         reset_seconds: float = 30.0,
     ) -> None:
         if threshold <= 0:
-            raise ValueError(
-                "threshold must be greater than zero"
-            )
+            raise ValueError("threshold must be greater than zero")
 
         if reset_seconds < 0:
-            raise ValueError(
-                "reset_seconds must not be negative"
-            )
+            raise ValueError("reset_seconds must not be negative")
 
         self.threshold = threshold
         self.reset_seconds = reset_seconds
@@ -381,11 +365,7 @@ class LLMGateway:
 
         self.config = config or GatewayConfig()
 
-        self.metrics = (
-            metrics
-            if metrics is not None
-            else GatewayMetrics()
-        )
+        self.metrics = metrics if metrics is not None else GatewayMetrics()
 
         self._breakers: dict[str, CircuitBreaker] = {}
 
@@ -407,12 +387,8 @@ class LLMGateway:
 
         if name not in self._breakers:
             self._breakers[name] = CircuitBreaker(
-                threshold=(
-                    self.config.circuit_failure_threshold
-                ),
-                reset_seconds=(
-                    self.config.circuit_reset_seconds
-                ),
+                threshold=(self.config.circuit_failure_threshold),
+                reset_seconds=(self.config.circuit_reset_seconds),
             )
 
         return self._breakers[name]
@@ -427,17 +403,12 @@ class LLMGateway:
             self.fallback_provider is not None
             and self.fallback_provider is not self.provider
         ):
-            providers.append(
-                self.fallback_provider
-            )
+            providers.append(self.fallback_provider)
 
         return providers
 
     def _circuit_snapshots(self) -> dict[str, Any]:
-        return {
-            name: breaker.snapshot()
-            for name, breaker in self._breakers.items()
-        }
+        return {name: breaker.snapshot() for name, breaker in self._breakers.items()}
 
     # ------------------------------------------------------------------
     # Retry helpers
@@ -450,10 +421,7 @@ class LLMGateway:
         status_code = _extract_status_code(exc)
 
         if status_code is not None:
-            return (
-                status_code
-                in self.config.transient_status_codes
-            )
+            return status_code in self.config.transient_status_codes
 
         # Network-like exceptions are generally transient.
         transient_names = {
@@ -468,12 +436,8 @@ class LLMGateway:
         self,
         retry_index: int,
     ) -> float:
-        return (
-            self.config.retry_delay_seconds
-            * (
-                self.config.retry_backoff_factor
-                ** retry_index
-            )
+        return self.config.retry_delay_seconds * (
+            self.config.retry_backoff_factor**retry_index
         )
 
     # ------------------------------------------------------------------
@@ -492,14 +456,10 @@ class LLMGateway:
             )
 
         if not isinstance(request, LLMRequest):
-            raise TypeError(
-                "request must be LLMRequest or str"
-            )
+            raise TypeError("request must be LLMRequest or str")
 
         if not request.prompt.strip():
-            raise ValueError(
-                "prompt must not be empty"
-            )
+            raise ValueError("prompt must not be empty")
 
         started = perf_counter()
 
@@ -511,22 +471,16 @@ class LLMGateway:
         providers = self._providers()
 
         if not providers:
-            raise RuntimeError(
-                "no LLM providers configured"
-            )
+            raise RuntimeError("no LLM providers configured")
 
-        for provider_index, provider in enumerate(
-            providers
-        ):
+        for provider_index, provider in enumerate(providers):
             provider_name = getattr(
                 provider,
                 "name",
                 provider.__class__.__name__,
             )
 
-            breaker = self._get_circuit_breaker(
-                provider
-            )
+            breaker = self._get_circuit_breaker(provider)
 
             is_fallback = provider_index > 0
 
@@ -549,28 +503,18 @@ class LLMGateway:
 
                 continue
 
-            for retry_index in range(
-                self.config.max_retries + 1
-            ):
-                attempt_number = (
-                    len(retry_history) + 1
-                )
+            for retry_index in range(self.config.max_retries + 1):
+                attempt_number = len(retry_history) + 1
 
                 try:
-                    response = provider.generate(
-                        request
-                    )
+                    response = provider.generate(request)
 
                     if response is None:
-                        raise RuntimeError(
-                            "provider returned None"
-                        )
+                        raise RuntimeError("provider returned None")
 
                     breaker.record_success()
 
-                    latency_ms = (
-                        perf_counter() - started
-                    ) * 1000.0
+                    latency_ms = (perf_counter() - started) * 1000.0
 
                     response.latency_ms = round(
                         latency_ms,
@@ -578,10 +522,7 @@ class LLMGateway:
                     )
 
                     response.metadata = {
-                        **(
-                            response.metadata
-                            or {}
-                        ),
+                        **(response.metadata or {}),
                         "attempts": retry_history,
                         "fallback": is_fallback,
                         "provider_index": provider_index,
@@ -589,29 +530,19 @@ class LLMGateway:
 
                     self.metrics.record_success(
                         latency_ms=latency_ms,
-                        input_tokens=(
-                            response.input_tokens
-                        ),
-                        output_tokens=(
-                            response.output_tokens
-                        ),
+                        input_tokens=(response.input_tokens),
+                        output_tokens=(response.output_tokens),
                     )
 
                     return response
 
                 except Exception as exc:
-                    transient = (
-                        self._is_transient(exc)
-                    )
+                    transient = self._is_transient(exc)
 
                     if transient:
                         self.metrics.record_transient_failure()
 
-                    should_retry = (
-                        transient
-                        and retry_index
-                        < self.config.max_retries
-                    )
+                    should_retry = transient and retry_index < self.config.max_retries
 
                     retry_history.append(
                         {
@@ -619,10 +550,7 @@ class LLMGateway:
                             "attempt": attempt_number,
                             "retry_index": retry_index,
                             "fallback": is_fallback,
-                            "status": (
-                                _extract_status_code(exc)
-                                or "error"
-                            ),
+                            "status": (_extract_status_code(exc) or "error"),
                             "transient": transient,
                             "retry": should_retry,
                             "error": str(exc),
@@ -638,9 +566,7 @@ class LLMGateway:
                     if should_retry:
                         self.metrics.record_retry()
 
-                        delay = self._retry_delay(
-                            retry_index
-                        )
+                        delay = self._retry_delay(retry_index)
 
                         if delay > 0:
                             sleep(delay)
@@ -654,19 +580,13 @@ class LLMGateway:
 
                     break
 
-        latency_ms = (
-            perf_counter() - started
-        ) * 1000.0
+        latency_ms = (perf_counter() - started) * 1000.0
 
-        self.metrics.record_failure(
-            latency_ms=latency_ms
-        )
+        self.metrics.record_failure(latency_ms=latency_ms)
 
         return LLMResponse(
             text=(
-                "No LLM provider succeeded; "
-                "retrieved context is available "
-                "for review."
+                "No LLM provider succeeded; retrieved context is available for review."
             ),
             provider="gateway",
             model="",
@@ -678,9 +598,7 @@ class LLMGateway:
                 "attempts": retry_history,
                 "fallback": False,
                 "failed": True,
-                "circuit_breakers": (
-                    self._circuit_snapshots()
-                ),
+                "circuit_breakers": (self._circuit_snapshots()),
             },
         )
 
@@ -691,9 +609,7 @@ class LLMGateway:
     def snapshot(self) -> dict[str, Any]:
         return {
             "gateway": self.metrics.to_dict(),
-            "circuit_breakers": (
-                self._circuit_snapshots()
-            ),
+            "circuit_breakers": (self._circuit_snapshots()),
         }
 
     def metrics_snapshot(

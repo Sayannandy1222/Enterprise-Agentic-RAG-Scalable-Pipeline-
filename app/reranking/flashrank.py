@@ -31,9 +31,7 @@ class FlashRankReranker:
         try:
             from flashrank import Ranker
 
-            FlashRankReranker._ranker = Ranker(
-                model_name=self.model_name
-            )
+            FlashRankReranker._ranker = Ranker(model_name=self.model_name)
 
         except Exception:
             # Keep deterministic local fallback available for
@@ -55,23 +53,14 @@ class FlashRankReranker:
         documents: list[Any],
         limit: int,
     ) -> list[Any]:
-        query_terms = set(
-            query.lower().split()
-        )
+        query_terms = set(query.lower().split())
 
         scored = []
 
-        for index, document in enumerate(
-            documents
-        ):
-            text = self._text(
-                document
-            ).lower()
+        for index, document in enumerate(documents):
+            text = self._text(document).lower()
 
-            score = sum(
-                term in text
-                for term in query_terms
-            )
+            score = sum(term in text for term in query_terms)
 
             scored.append(
                 (
@@ -89,10 +78,7 @@ class FlashRankReranker:
             reverse=True,
         )
 
-        return [
-            document
-            for _, _, document in scored[:limit]
-        ]
+        return [document for _, _, document in scored[:limit]]
 
     def rerank(
         self,
@@ -108,9 +94,7 @@ class FlashRankReranker:
             len(documents),
         )
 
-        ranker = (
-            FlashRankReranker._ranker
-        )
+        ranker = FlashRankReranker._ranker
 
         if ranker is None:
             return self._fallback(
@@ -127,13 +111,9 @@ class FlashRankReranker:
             passages = [
                 {
                     "id": index,
-                    "text": self._text(
-                        document
-                    ),
+                    "text": self._text(document),
                 }
-                for index, document in enumerate(
-                    documents
-                )
+                for index, document in enumerate(documents)
             ]
 
             request = RerankRequest(
@@ -141,22 +121,15 @@ class FlashRankReranker:
                 passages=passages,
             )
 
-            ranked = ranker.rerank(
-                request
-            )
+            ranked = ranker.rerank(request)
 
             output: list[Any] = []
 
             for item in ranked[:limit]:
                 index = item.get("id")
 
-                if (
-                    isinstance(index, int)
-                    and 0 <= index < len(documents)
-                ):
-                    output.append(
-                        documents[index]
-                    )
+                if isinstance(index, int) and 0 <= index < len(documents):
+                    output.append(documents[index])
 
             if output:
                 return output

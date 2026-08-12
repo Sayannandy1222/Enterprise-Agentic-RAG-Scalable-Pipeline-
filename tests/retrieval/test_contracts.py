@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.embeddings.gemini import GeminiEmbedder
 from app.ingestion.models import Document
 from app.retrieval.bm25 import BM25Retriever
@@ -27,15 +29,9 @@ def test_bm25_respects_result_limit():
 
 def test_bm25_returns_relevant_document():
     documents = [
-        Document(
-            "DC motor converts electrical energy into mechanical energy."
-        ),
-        Document(
-            "Transformer transfers electrical energy between circuits."
-        ),
-        Document(
-            "Induction motor uses electromagnetic induction."
-        ),
+        Document("DC motor converts electrical energy into mechanical energy."),
+        Document("Transformer transfers electrical energy between circuits."),
+        Document("Induction motor uses electromagnetic induction."),
     ]
 
     retriever = BM25Retriever(documents)
@@ -47,10 +43,7 @@ def test_bm25_returns_relevant_document():
 
     assert results
 
-    assert any(
-        "DC motor" in document.text
-        for _, document in results
-    )
+    assert any("DC motor" in document.text for _, document in results)
 
 
 def test_rrf_preserves_high_ranked_candidates():
@@ -82,9 +75,7 @@ def test_rrf_preserves_high_ranked_candidates():
 def test_vector_store_respects_search_limit():
     embedder = GeminiEmbedder()
 
-    store = InMemoryVectorStore(
-        embedder
-    )
+    store = InMemoryVectorStore(embedder)
 
     documents = [
         Document("DC motor"),
@@ -95,9 +86,7 @@ def test_vector_store_respects_search_limit():
 
     store.upsert(documents)
 
-    query_vector = embedder.embed(
-        "motor"
-    )
+    query_vector = embedder.embed("motor")
 
     results = store.search(
         query_vector=query_vector,
@@ -105,3 +94,74 @@ def test_vector_store_respects_search_limit():
     )
 
     assert len(results) <= 2
+
+
+def test_rrf_supports_weighted_lexical_evidence():
+    dense = [
+        (1.0, Document("dense-only")),
+        (0.9, Document("shared")),
+    ]
+
+    lexical = [
+        (1.0, dense[1][1]),
+        (0.9, Document("lexical-only")),
+    ]
+
+    results = reciprocal_rank_fusion(
+        dense,
+        lexical,
+        limit=3,
+        dense_weight=1.0,
+        lexical_weight=2.0,
+    )
+
+    assert results
+
+    texts = [document.text for document in results]
+
+    assert "shared" in texts
+    assert "lexical-only" in texts
+
+
+def test_rrf_rejects_invalid_weights():
+    dense = [
+        (1.0, Document("alpha")),
+    ]
+
+    lexical = []
+
+    with pytest.raises(
+        ValueError,
+        match="lexical_weight",
+    ):
+        reciprocal_rank_fusion(
+            dense,
+            lexical,
+            dense_weight=1.0,
+            lexical_weight=0.0,
+        )
+
+
+def test_rrf_order_is_deterministic():
+    dense = [
+        (1.0, Document("alpha")),
+        (1.0, Document("beta")),
+    ]
+
+    lexical = []
+
+    first = reciprocal_rank_fusion(
+        dense,
+        lexical,
+        limit=2,
+    )
+
+    second = reciprocal_rank_fusion(
+        dense,
+        lexical,
+        limit=2,
+    )
+
+    assert [document.text for document in first] == [
+        document.text for document in second
+    ]

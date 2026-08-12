@@ -18,11 +18,7 @@ from app.retrieval.vector_store import InMemoryVectorStore
 # CONFIGURATION
 # ============================================================================
 
-DATASET_PATH = (
-    Path(__file__).parent
-    / "data"
-    / "rag_eval.json"
-)
+DATASET_PATH = Path(__file__).parent / "data" / "rag_eval.json"
 
 ITERATIONS = 10
 
@@ -33,6 +29,7 @@ RERANK_LIMIT = 5
 TOP_K = 5
 
 EMBEDDING_CACHE_SIZE = 256
+RERANK_CACHE_SIZE = 256
 
 
 # ============================================================================
@@ -59,11 +56,7 @@ def percentile(
     if len(ordered) == 1:
         return float(ordered[0])
 
-    position = (
-        percentile_value
-        / 100.0
-        * (len(ordered) - 1)
-    )
+    position = percentile_value / 100.0 * (len(ordered) - 1)
 
     lower = int(position)
     upper = min(
@@ -71,19 +64,9 @@ def percentile(
         len(ordered) - 1,
     )
 
-    fraction = (
-        position
-        - lower
-    )
+    fraction = position - lower
 
-    return (
-        ordered[lower]
-        + (
-            ordered[upper]
-            - ordered[lower]
-        )
-        * fraction
-    )
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
 def calculate_stats(
@@ -97,18 +80,14 @@ def calculate_stats(
         }
 
     return {
-        "p50": float(
-            median(values)
-        ),
+        "p50": float(median(values)),
         "p95": float(
             percentile(
                 values,
                 95.0,
             )
         ),
-        "mean": float(
-            mean(values)
-        ),
+        "mean": float(mean(values)),
     }
 
 
@@ -133,14 +112,10 @@ def load_dataset() -> list[dict[str, Any]]:
         cases,
         list,
     ):
-        raise ValueError(
-            "'cases' must be a list"
-        )
+        raise ValueError("'cases' must be a list")
 
     if not cases:
-        raise ValueError(
-            "Evaluation dataset is empty."
-        )
+        raise ValueError("Evaluation dataset is empty.")
 
     return cases
 
@@ -223,17 +198,11 @@ def build_retrieval_service() -> RetrievalService:
         ),
     ]
 
-    vector_store = InMemoryVectorStore(
-        embedder
-    )
+    vector_store = InMemoryVectorStore(embedder)
 
-    vector_store.upsert(
-        documents
-    )
+    vector_store.upsert(documents)
 
-    bm25 = BM25Retriever(
-        documents
-    )
+    bm25 = BM25Retriever(documents)
 
     return RetrievalService(
         vector_store=vector_store,
@@ -244,6 +213,7 @@ def build_retrieval_service() -> RetrievalService:
         rerank_limit=RERANK_LIMIT,
         top_k=TOP_K,
         embedding_cache_size=EMBEDDING_CACHE_SIZE,
+        rerank_cache_size=RERANK_CACHE_SIZE,
     )
 
 
@@ -260,24 +230,18 @@ def extract_chunk_id(
         document,
         dict,
     ):
-        value = document.get(
-            "chunk_id"
-        )
+        value = document.get("chunk_id")
 
         if value is not None:
             return str(value)
 
-        metadata = document.get(
-            "metadata"
-        )
+        metadata = document.get("metadata")
 
         if isinstance(
             metadata,
             dict,
         ):
-            value = metadata.get(
-                "chunk_id"
-            )
+            value = metadata.get("chunk_id")
 
             if value is not None:
                 return str(value)
@@ -292,9 +256,7 @@ def extract_chunk_id(
         metadata,
         dict,
     ):
-        value = metadata.get(
-            "chunk_id"
-        )
+        value = metadata.get("chunk_id")
 
         if value is not None:
             return str(value)
@@ -326,148 +288,76 @@ def run_latency_benchmark(
         "Dense/Qdrant",
         "BM25",
         "RRF",
+        "Rerank Cache",
         "FlashRank",
         "TOTAL",
     )
 
-    cold: dict[
-        str,
-        list[float],
-    ] = {
-        stage: []
-        for stage in stages
-    }
+    cold: dict[str, list[float]] = {stage: [] for stage in stages}
 
-    warm: dict[
-        str,
-        list[float],
-    ] = {
-        stage: []
-        for stage in stages
-    }
+    warm: dict[str, list[float]] = {stage: [] for stage in stages}
 
-    cold_cache_hits = 0
-    warm_cache_hits = 0
+    cold_embedding_hits = 0
+    warm_embedding_hits = 0
+
+    cold_rerank_hits = 0
+    warm_rerank_hits = 0
 
     def execute(
         query: str,
-        target: dict[
-            str,
-            list[float],
-        ],
-    ) -> bool:
+        target: dict[str, list[float]],
+    ) -> tuple[bool, bool]:
 
-        started = perf_counter()
-
-        result = (
-            retrieval.search_with_metrics(
-                query=query,
-                top_k=TOP_K,
-            )
+        result = retrieval.search_with_metrics(
+            query=query,
+            top_k=TOP_K,
         )
 
-        # The RetrievalService already measures every pipeline stage.
-        # Use those measurements instead of timing individual components
-        # externally, which avoids double-counting instrumentation overhead.
+        target["Embedding"].append(float(result["embedding_latency_ms"]))
 
-        target[
-            "Embedding"
-        ].append(
-            float(
-                result[
-                    "embedding_latency_ms"
-                ]
-            )
-        )
+        target["Dense/Qdrant"].append(float(result["dense_latency_ms"]))
 
-        target[
-            "Dense/Qdrant"
-        ].append(
-            float(
-                result[
-                    "dense_latency_ms"
-                ]
-            )
-        )
+        target["BM25"].append(float(result["bm25_latency_ms"]))
 
-        target[
-            "BM25"
-        ].append(
-            float(
-                result[
-                    "bm25_latency_ms"
-                ]
-            )
-        )
+        target["RRF"].append(float(result["rrf_latency_ms"]))
 
-        target[
-            "RRF"
-        ].append(
-            float(
-                result[
-                    "rrf_latency_ms"
-                ]
-            )
-        )
+        target["Rerank Cache"].append(float(result["rerank_cache_lookup_latency_ms"]))
 
-        target[
-            "FlashRank"
-        ].append(
-            float(
-                result[
-                    "reranking_latency_ms"
-                ]
-            )
-        )
+        target["FlashRank"].append(float(result["flashrank_execution_latency_ms"]))
 
-        # Use the service's authoritative pipeline total.
-        target[
-            "TOTAL"
-        ].append(
-            float(
-                result[
-                    "total_latency_ms"
-                ]
-            )
-        )
+        target["TOTAL"].append(float(result["total_latency_ms"]))
 
-        # Keep this measurement as a sanity check.
-        _ = (
-            perf_counter()
-            - started
-        )
-
-        return bool(
-            result[
-                "embedding_cache_hit"
-            ]
+        return (
+            bool(result["embedding_cache_hit"]),
+            bool(result["rerank_cache_hit"]),
         )
 
     # ------------------------------------------------------------------
     # COLD CACHE
     # ------------------------------------------------------------------
 
-    for _ in range(
-        ITERATIONS
-    ):
-
+    for _ in range(ITERATIONS):
         for query in queries:
-
             retrieval.clear_embedding_cache()
+            retrieval.clear_rerank_cache()
 
-            if execute(
+            embedding_hit, rerank_hit = execute(
                 query,
                 cold,
-            ):
-                cold_cache_hits += 1
+            )
+
+            if embedding_hit:
+                cold_embedding_hits += 1
+
+            if rerank_hit:
+                cold_rerank_hits += 1
 
     # ------------------------------------------------------------------
     # WARM CACHE
     # ------------------------------------------------------------------
 
     retrieval.clear_embedding_cache()
-
-    # Prime the cache once.
+    retrieval.clear_rerank_cache()
 
     for query in queries:
         execute(
@@ -475,49 +365,31 @@ def run_latency_benchmark(
             warm,
         )
 
-    # Actual warm samples.
+    warm_embedding_hits = 0
+    warm_rerank_hits = 0
 
-    warm_cache_hits = 0
-
-    for _ in range(
-        ITERATIONS
-    ):
-
+    for _ in range(ITERATIONS):
         for query in queries:
-
-            if execute(
+            embedding_hit, rerank_hit = execute(
                 query,
                 warm,
-            ):
-                warm_cache_hits += 1
+            )
+
+            if embedding_hit:
+                warm_embedding_hits += 1
+
+            if rerank_hit:
+                warm_rerank_hits += 1
 
     return {
-        "cold": {
-            stage: calculate_stats(
-                values
-            )
-            for stage, values
-            in cold.items()
-        },
-        "warm": {
-            stage: calculate_stats(
-                values
-            )
-            for stage, values
-            in warm.items()
-        },
-        "cold_samples": len(
-            cold["TOTAL"]
-        ),
-        "warm_samples": len(
-            warm["TOTAL"]
-        ),
-        "cold_cache_hits": (
-            cold_cache_hits
-        ),
-        "warm_cache_hits": (
-            warm_cache_hits
-        ),
+        "cold": {stage: calculate_stats(values) for stage, values in cold.items()},
+        "warm": {stage: calculate_stats(values) for stage, values in warm.items()},
+        "cold_samples": len(cold["TOTAL"]),
+        "warm_samples": len(warm["TOTAL"]),
+        "cold_cache_hits": cold_embedding_hits,
+        "warm_cache_hits": warm_embedding_hits,
+        "cold_rerank_cache_hits": cold_rerank_hits,
+        "warm_rerank_cache_hits": warm_rerank_hits,
     }
 
 
@@ -531,96 +403,49 @@ def run_quality_benchmark(
     cases: Sequence[dict[str, Any]],
 ) -> dict[str, Any]:
 
-    retrieved: list[
-        list[str]
-    ] = []
+    retrieved: list[list[str]] = []
 
-    relevant: list[
-        list[str]
-    ] = []
+    relevant: list[list[str]] = []
 
-    per_case: list[
-        dict[str, Any]
-    ] = []
+    per_case: list[dict[str, Any]] = []
 
     for case in cases:
+        query = str(case["query"])
 
-        query = str(
-            case["query"]
+        expected = [str(chunk_id) for chunk_id in case["relevant_chunk_ids"]]
+
+        result = retrieval.search_with_metrics(
+            query=query,
+            top_k=TOP_K,
         )
 
-        expected = [
-            str(chunk_id)
-            for chunk_id in case[
-                "relevant_chunk_ids"
-            ]
-        ]
+        results = result["results"]
 
-        result = (
-            retrieval.search_with_metrics(
-                query=query,
-                top_k=TOP_K,
-            )
-        )
-
-        results = result[
-            "results"
-        ]
-
-        retrieved_ids: list[
-            str
-        ] = []
+        retrieved_ids: list[str] = []
 
         for document in results:
-
-            chunk_id = (
-                extract_chunk_id(
-                    document
-                )
-            )
+            chunk_id = extract_chunk_id(document)
 
             if chunk_id is not None:
-                retrieved_ids.append(
-                    chunk_id
-                )
+                retrieved_ids.append(chunk_id)
 
-        retrieved.append(
-            retrieved_ids
-        )
+        retrieved.append(retrieved_ids)
 
-        relevant.append(
-            expected
-        )
+        relevant.append(expected)
 
-        case_metrics = (
-            evaluate_retrieval(
-                [retrieved_ids],
-                [expected],
-                ks=(3, 5),
-            )
+        case_metrics = evaluate_retrieval(
+            [retrieved_ids],
+            [expected],
+            ks=(3, 5),
         )
 
         per_case.append(
             {
-                "id": str(
-                    case["id"]
-                ),
-                "recall_at_3": (
-                    case_metrics[
-                        "recall_at_3"
-                    ]
-                ),
-                "recall_at_5": (
-                    case_metrics[
-                        "recall_at_5"
-                    ]
-                ),
-                "mrr": case_metrics[
-                    "mrr"
-                ],
-                "retrieved": (
-                    retrieved_ids
-                ),
+                "id": str(case["id"]),
+                "recall_at_3": (case_metrics["recall_at_3"]),
+                "recall_at_5": (case_metrics["recall_at_5"]),
+                "mrr": case_metrics["mrr"],
+                "retrieved": (retrieved_ids),
             }
         )
 
@@ -650,27 +475,15 @@ def print_latency_table(
 ) -> None:
 
     print()
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
     print(title)
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
-    print(
-        f"{'Stage':<22}"
-        f"{'P50 (ms)':>14}"
-        f"{'P95 (ms)':>14}"
-        f"{'Mean (ms)':>14}"
-    )
+    print(f"{'Stage':<22}{'P50 (ms)':>14}{'P95 (ms)':>14}{'Mean (ms)':>14}")
 
-    print(
-        "-" * 80
-    )
+    print("-" * 80)
 
     for stage, values in metrics.items():
-
         print(
             f"{stage:<22}"
             f"{values['p50']:>14.3f}"
@@ -696,115 +509,67 @@ def print_report(
     )
 
     print()
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
     print("CACHE")
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
-    print(
-        f"Cold samples:            "
-        f"{latency['cold_samples']}"
-    )
+    print(f"Cold samples:            {latency['cold_samples']}")
 
-    print(
-        f"Warm samples:            "
-        f"{latency['warm_samples']}"
-    )
+    print(f"Warm samples:            {latency['warm_samples']}")
 
-    print(
-        f"Cold cache hits:         "
-        f"{latency['cold_cache_hits']}"
-    )
+    print(f"Cold embedding hits:     {latency['cold_cache_hits']}")
 
-    print(
-        f"Warm cache hits:         "
-        f"{latency['warm_cache_hits']}"
-    )
+    print(f"Warm embedding hits:     {latency['warm_cache_hits']}")
+
+    print(f"Cold rerank hits:        {latency['cold_rerank_cache_hits']}")
+
+    print(f"Warm rerank hits:        {latency['warm_rerank_cache_hits']}")
 
     print()
-    print(
-        "=" * 80
-    )
-    print(
-        "RETRIEVAL QUALITY"
-    )
-    print(
-        "=" * 80
-    )
 
-    metrics = quality[
-        "metrics"
-    ]
+    rerank_cache = latency.get("rerank_cache", {})
 
-    print(
-        f"Recall@3:                "
-        f"{metrics['recall_at_3']:.4f}"
-    )
+    if rerank_cache:
+        print(f"Rerank cache size:       {rerank_cache['size']}")
 
-    print(
-        f"Recall@5:                "
-        f"{metrics['recall_at_5']:.4f}"
-    )
+        print(f"Rerank cache capacity:   {rerank_cache['capacity']}")
 
-    print(
-        f"MRR:                     "
-        f"{metrics['mrr']:.4f}"
-    )
+        print(f"Rerank cache hit rate:   {rerank_cache['hit_rate'] * 100:.2f}%")
 
     print()
-    print(
-        "=" * 80
-    )
-    print(
-        "EMBEDDING CACHE"
-    )
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
+    print("RETRIEVAL QUALITY")
+    print("=" * 80)
 
-    print(
-        f"Cache size:              "
-        f"{cache['size']}"
-    )
+    metrics = quality["metrics"]
 
-    print(
-        f"Cache capacity:          "
-        f"{cache['capacity']}"
-    )
+    print(f"Recall@3:                {metrics['recall_at_3']:.4f}")
 
-    print(
-        f"Cache hits:              "
-        f"{cache['hits']}"
-    )
+    print(f"Recall@5:                {metrics['recall_at_5']:.4f}")
 
-    print(
-        f"Cache misses:            "
-        f"{cache['misses']}"
-    )
-
-    print(
-        f"Cache hit rate:          "
-        f"{cache['hit_rate'] * 100:.2f}%"
-    )
+    print(f"MRR:                     {metrics['mrr']:.4f}")
 
     print()
-    print(
-        "=" * 80
-    )
-    print(
-        "PER-CASE RESULTS"
-    )
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
+    print("EMBEDDING CACHE")
+    print("=" * 80)
 
-    for case in quality[
-        "cases"
-    ]:
+    print(f"Cache size:              {cache['size']}")
 
+    print(f"Cache capacity:          {cache['capacity']}")
+
+    print(f"Cache hits:              {cache['hits']}")
+
+    print(f"Cache misses:            {cache['misses']}")
+
+    print(f"Cache hit rate:          {cache['hit_rate'] * 100:.2f}%")
+
+    print()
+    print("=" * 80)
+    print("PER-CASE RESULTS")
+    print("=" * 80)
+
+    for case in quality["cases"]:
         print(
             f"{case['id']}: "
             f"Recall@3="
@@ -815,25 +580,12 @@ def print_report(
             f"{case['mrr']:.4f}"
         )
 
-        print(
-            "  Retrieved: "
-            + ", ".join(
-                case[
-                    "retrieved"
-                ]
-            )
-        )
+        print("  Retrieved: " + ", ".join(case["retrieved"]))
 
     print()
-    print(
-        "=" * 80
-    )
-    print(
-        "BENCHMARK COMPLETE"
-    )
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
+    print("BENCHMARK COMPLETE")
+    print("=" * 80)
 
 
 # ============================================================================
@@ -843,89 +595,48 @@ def print_report(
 
 def main() -> None:
 
-    print(
-        "=" * 80
-    )
-    print(
-        "PRODUCTION RAG RETRIEVAL BENCHMARK"
-    )
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
+    print("PRODUCTION RAG RETRIEVAL BENCHMARK")
+    print("=" * 80)
 
     cases = load_dataset()
 
-    queries = [
-        str(
-            case["query"]
-        )
-        for case in cases
-    ]
+    queries = [str(case["query"]) for case in cases]
 
-    retrieval = (
-        build_retrieval_service()
-    )
+    retrieval = build_retrieval_service()
 
     print()
-    print(
-        "Configuration"
-    )
-    print(
-        "-" * 80
-    )
+    print("Configuration")
+    print("-" * 80)
 
-    print(
-        f"Dense candidates:       "
-        f"{DENSE_LIMIT}"
-    )
+    print(f"Dense candidates:       {DENSE_LIMIT}")
 
-    print(
-        f"BM25 candidates:        "
-        f"{BM25_LIMIT}"
-    )
+    print(f"BM25 candidates:        {BM25_LIMIT}")
 
-    print(
-        f"RRF candidates:         "
-        f"{RRF_LIMIT}"
-    )
+    print(f"RRF candidates:         {RRF_LIMIT}")
 
-    print(
-        f"FlashRank results:      "
-        f"{RERANK_LIMIT}"
-    )
+    print(f"FlashRank results:      {RERANK_LIMIT}")
 
-    print(
-        f"Embedding cache:        "
-        f"{EMBEDDING_CACHE_SIZE}"
-    )
+    print(f"Embedding cache:        {EMBEDDING_CACHE_SIZE}")
 
-    print(
-        f"Iterations:             "
-        f"{ITERATIONS}"
-    )
+    print(f"Iterations:             {ITERATIONS}")
 
     print()
-    print(
-        "Running latency benchmark..."
-    )
+    print("Running latency benchmark...")
 
     latency = run_latency_benchmark(
         retrieval,
         queries,
     )
 
-    print(
-        "Running retrieval-quality benchmark..."
-    )
+    print("Running retrieval-quality benchmark...")
 
     quality = run_quality_benchmark(
         retrieval,
         cases,
     )
 
-    cache = (
-        retrieval.embedding_cache_stats()
-    )
+    cache = retrieval.embedding_cache_stats()
 
     print_report(
         latency,
