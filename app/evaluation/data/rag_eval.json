@@ -1,1 +1,25 @@
-{"queries":[]}
+{
+  "cases": [
+    {
+      "id": "dc-motor-001",
+      "query": "How does a DC motor work?",
+      "relevant_chunk_ids": [
+        "chunk-a"
+      ]
+    },
+    {
+      "id": "dc-motor-002",
+      "query": "What affects DC motor speed?",
+      "relevant_chunk_ids": [
+        "chunk-b"
+      ]
+    },
+    {
+      "id": "dc-motor-003",
+      "query": "What is back EMF in a DC motor?",
+      "relevant_chunk_ids": [
+        "chunk-c"
+      ]
+    }
+  ]
+}
