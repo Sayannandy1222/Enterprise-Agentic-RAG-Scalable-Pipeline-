@@ -9,3 +9,7 @@ dependencies=["fastapi","uvicorn","pydantic-settings","pypdf","qdrant-client","f
 [project.optional-dependencies]
 dev=["pytest","httpx"]
 
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["data*", "tests*"]
+
